@@ -1,200 +1,24 @@
-const BUILD_ID = "2026-08-26g";
+const BUILD_ID = "2026-08-26h";
 const $ = (id) => document.getElementById(id);
-
-const statusBadge = $("statusBadge");
-const loadButton = $("loadButton");
-const loadHint = $("loadHint");
-const photoInput = $("photoInput");
-const previewWrap = $("previewWrap");
-const previewImage = $("previewImage");
-const imageInfo = $("imageInfo");
-const ocrButton = $("ocrButton");
-const resultOutput = $("resultOutput");
-const timeBadge = $("timeBadge");
-const logOutput = $("logOutput");
-const clearLogButton = $("clearLogButton");
-
-let PaddleOCR = null;
-let ocr = null;
-let selectedBlob = null;
-let loading = false;
-let running = false;
-
-function stamp() {
-  return new Intl.DateTimeFormat("en-HK", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(new Date());
-}
-
-function log(message) {
-  const line = `[${stamp()}] ${message}`;
-  logOutput.textContent += `${line}\n`;
-  logOutput.scrollTop = logOutput.scrollHeight;
-  console.log(line);
-}
-
-function setBadge(text, mode = "neutral") {
-  statusBadge.textContent = text;
-  statusBadge.className = `badge ${mode}`;
-}
-
-function setTime(text, mode = "neutral") {
-  timeBadge.textContent = text;
-  timeBadge.className = `badge ${mode}`;
-}
-
-function updateActions() {
-  loadButton.disabled = loading || !!ocr;
-  ocrButton.disabled = !ocr || !selectedBlob || running;
-}
-
-async function resizeToBlob(file) {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = new Image();
-    img.decoding = "async";
-    img.src = url;
-    await img.decode();
-
-    const originalWidth = img.naturalWidth;
-    const originalHeight = img.naturalHeight;
-    const maxSide = 1600;
-    const scale = Math.min(1, maxSide / Math.max(originalWidth, originalHeight));
-    const width = Math.max(1, Math.round(originalWidth * scale));
-    const height = Math.max(1, Math.round(originalHeight * scale));
-
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d", { alpha: false });
-    if (!ctx) throw new Error("Canvas unavailable");
-    ctx.drawImage(img, 0, 0, width, height);
-
-    const blob = await new Promise((resolve, reject) => {
-      canvas.toBlob((value) => value ? resolve(value) : reject(new Error("JPEG conversion failed")), "image/jpeg", 0.9);
-    });
-
-    return { blob, width, height, originalWidth, originalHeight };
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-async function importPaddleOCR() {
-  if (PaddleOCR) return PaddleOCR;
-  log("Loading official PaddleOCR browser SDK from jsDelivr…");
-  const mod = await import("https://cdn.jsdelivr.net/npm/@paddleocr/paddleocr-js@0.4.2/+esm");
-  if (!mod.PaddleOCR) throw new Error("PaddleOCR export not found in browser package");
-  PaddleOCR = mod.PaddleOCR;
-  log("PaddleOCR browser SDK loaded.");
-  return PaddleOCR;
-}
-
-async function loadOcr() {
-  if (ocr || loading) return;
-  loading = true;
-  setBadge("Loading", "busy");
-  loadHint.textContent = "Loading browser OCR library and Chinese PP OCR v5 mobile models…";
-  updateActions();
-  const started = performance.now();
-
-  try {
-    const OCR = await importPaddleOCR();
-    log("Creating PP OCR v5 Chinese pipeline with WASM backend…");
-    ocr = await OCR.create({
-      lang: "ch",
-      ocrVersion: "PP-OCRv5",
-      ortOptions: {
-        backend: "wasm",
-        wasmPaths: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",
-        numThreads: 1,
-        simd: true,
-      },
-    });
-
-    const seconds = (performance.now() - started) / 1000;
-    setBadge("Ready", "good");
-    loadHint.textContent = `Local OCR ready in ${seconds.toFixed(1)} sec.`;
-    log(`PP OCR v5 ready in ${seconds.toFixed(1)} sec.`);
-  } catch (error) {
-    ocr = null;
-    setBadge("Error", "bad");
-    loadHint.textContent = "Load failed. Send the Technical log back for adjustment.";
-    resultOutput.textContent = `Load error: ${error?.message || String(error)}`;
-    log(`Load error: ${error?.message || String(error)}`);
-    if (error?.stack) log(error.stack);
-  } finally {
-    loading = false;
-    updateActions();
-  }
-}
-
-async function runOcr() {
-  if (!ocr || !selectedBlob || running) return;
-  running = true;
-  setTime("Running locally", "busy");
-  resultOutput.textContent = "Recognizing text on this iPhone…";
-  updateActions();
-  const started = performance.now();
-
-  try {
-    const [result] = await ocr.predict(selectedBlob);
-    const items = result?.items || [];
-    const lines = items.map((item, index) => {
-      const score = Number.isFinite(item.score) ? ` (${(item.score * 100).toFixed(1)}%)` : "";
-      return `${index + 1}. ${item.text || ""}${score}`;
-    });
-    const seconds = (performance.now() - started) / 1000;
-    resultOutput.textContent = lines.length ? lines.join("\n") : "No text recognized.";
-    setTime(`${seconds.toFixed(1)} sec`, "good");
-    log(`OCR complete in ${seconds.toFixed(1)} sec. Recognized lines: ${items.length}.`);
-    if (result?.metrics) {
-      log(`Metrics: det ${result.metrics.detMs ?? "n/a"} ms · rec ${result.metrics.recMs ?? "n/a"} ms · total ${result.metrics.totalMs ?? "n/a"} ms.`);
-    }
-  } catch (error) {
-    setTime("Error", "bad");
-    resultOutput.textContent = `OCR error: ${error?.message || String(error)}`;
-    log(`OCR error: ${error?.message || String(error)}`);
-    if (error?.stack) log(error.stack);
-  } finally {
-    running = false;
-    updateActions();
-  }
-}
-
-loadButton.addEventListener("click", loadOcr);
-
-photoInput.addEventListener("change", async () => {
-  const [file] = photoInput.files || [];
-  if (!file) return;
-  selectedBlob = null;
-  ocrButton.disabled = true;
-  previewWrap.hidden = false;
-  imageInfo.textContent = "Preparing image locally…";
-  try {
-    const processed = await resizeToBlob(file);
-    selectedBlob = processed.blob;
-    const previewUrl = URL.createObjectURL(processed.blob);
-    previewImage.onload = () => URL.revokeObjectURL(previewUrl);
-    previewImage.src = previewUrl;
-    imageInfo.textContent = `${processed.originalWidth} × ${processed.originalHeight} → ${processed.width} × ${processed.height} for local OCR`;
-    log(`Photo prepared locally: ${processed.originalWidth}x${processed.originalHeight} -> ${processed.width}x${processed.height}.`);
-  } catch (error) {
-    previewWrap.hidden = true;
-    resultOutput.textContent = `Image error: ${error?.message || String(error)}`;
-    log(`Image error: ${error?.message || String(error)}`);
-  }
-  updateActions();
-});
-
-ocrButton.addEventListener("click", runOcr);
-clearLogButton.addEventListener("click", () => { logOutput.textContent = ""; });
-window.addEventListener("unhandledrejection", (event) => log(`Unhandled rejection: ${event.reason?.message || event.reason || "unknown"}`));
-
-log(`PP OCR v5 test page loaded. Build ${BUILD_ID}.`);
-log("No AI API, Firebase or WebGPU model has been started.");
-log(`Browser: ${navigator.userAgent}`);
-updateActions();
+const statusBadge=$("statusBadge"),loadButton=$("loadButton"),loadHint=$("loadHint"),photoInput=$("photoInput"),previewWrap=$("previewWrap"),previewImage=$("previewImage"),imageInfo=$("imageInfo"),ocrButton=$("ocrButton"),resultOutput=$("resultOutput"),result960=$("result960"),result512=$("result512"),timeBadge=$("timeBadge"),logOutput=$("logOutput"),clearLogButton=$("clearLogButton"),overlayCanvas=$("overlayCanvas"),boxes960=$("boxes960"),boxes512=$("boxes512"),mergedBoxes=$("mergedBoxes");
+let PaddleOCR=null,ocr=null,selectedBlob=null,selectedBitmap=null,loading=false,running=false;
+function stamp(){return new Intl.DateTimeFormat("en-HK",{hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(new Date())}
+function log(m){const s=`[${stamp()}] ${m}`;logOutput.textContent+=`${s}\n`;logOutput.scrollTop=logOutput.scrollHeight;console.log(s)}
+function badge(el,t,m="neutral"){el.textContent=t;el.className=`badge ${m}`}
+function updateActions(){loadButton.disabled=loading||!!ocr;ocrButton.disabled=!ocr||!selectedBlob||running}
+async function resizeToBlob(file){const url=URL.createObjectURL(file);try{const img=new Image();img.decoding="async";img.src=url;await img.decode();const ow=img.naturalWidth,oh=img.naturalHeight,maxSide=1600,s=Math.min(1,maxSide/Math.max(ow,oh)),w=Math.max(1,Math.round(ow*s)),h=Math.max(1,Math.round(oh*s));const c=document.createElement("canvas");c.width=w;c.height=h;const x=c.getContext("2d",{alpha:false});if(!x)throw new Error("Canvas unavailable");x.drawImage(img,0,0,w,h);const blob=await new Promise((r,j)=>c.toBlob(v=>v?r(v):j(new Error("JPEG conversion failed")),"image/jpeg",.92));return{blob,width:w,height:h,originalWidth:ow,originalHeight:oh}}finally{URL.revokeObjectURL(url)}}
+async function importPaddleOCR(){if(PaddleOCR)return PaddleOCR;log("Loading official PaddleOCR browser SDK…");const mod=await import("https://cdn.jsdelivr.net/npm/@paddleocr/paddleocr-js@0.4.2/+esm");if(!mod.PaddleOCR)throw new Error("PaddleOCR export not found");PaddleOCR=mod.PaddleOCR;log("PaddleOCR SDK loaded.");return PaddleOCR}
+async function loadOcr(){if(ocr||loading)return;loading=true;badge(statusBadge,"Loading","busy");loadHint.textContent="Loading Chinese PP OCR v5 mobile models…";updateActions();const t=performance.now();try{const OCR=await importPaddleOCR();ocr=await OCR.create({lang:"ch",ocrVersion:"PP-OCRv5",ortOptions:{backend:"wasm",wasmPaths:"https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/",numThreads:1,simd:true}});const s=(performance.now()-t)/1000;badge(statusBadge,"Ready","good");loadHint.textContent=`Local OCR ready in ${s.toFixed(1)} sec.`;log(`PP OCR v5 ready in ${s.toFixed(1)} sec.`)}catch(e){ocr=null;badge(statusBadge,"Error","bad");loadHint.textContent="Load failed.";resultOutput.textContent=`Load error: ${e?.message||e}`;log(`Load error: ${e?.message||e}`)}finally{loading=false;updateActions()}}
+function polyBounds(poly){if(!Array.isArray(poly)||!poly.length)return null;const pts=Array.isArray(poly[0])?poly:[];if(!pts.length)return null;const xs=pts.map(p=>Number(p[0])),ys=pts.map(p=>Number(p[1]));if(xs.some(Number.isNaN)||ys.some(Number.isNaN))return null;return{x1:Math.min(...xs),y1:Math.min(...ys),x2:Math.max(...xs),y2:Math.max(...ys)}}
+function area(b){return Math.max(0,b.x2-b.x1)*Math.max(0,b.y2-b.y1)}
+function intersection(a,b){return Math.max(0,Math.min(a.x2,b.x2)-Math.max(a.x1,b.x1))*Math.max(0,Math.min(a.y2,b.y2)-Math.max(a.y1,b.y1))}
+function normalizeItems(result,scaleName){return(result?.items||[]).map((item,i)=>{const b=polyBounds(item.poly);return{id:`${scaleName}-${i+1}`,scale:scaleName,text:item.text||"",score:Number.isFinite(item.score)?item.score:0,poly:item.poly,bounds:b}}).filter(x=>x.bounds)}
+function mergeGrounded(items){const sorted=[...items].sort((a,b)=>b.score-a.score),kept=[];for(const b of sorted){let dup=false;for(const k of kept){const inter=intersection(b.bounds,k.bounds);if(!inter)continue;const aa=area(b.bounds),ak=area(k.bounds),iou=inter/(aa+ak-inter),contain=inter/Math.min(aa,ak);if(iou>.30||contain>.60){dup=true;break}}if(!dup)kept.push(b)}return kept.sort((a,b)=>{const dy=a.bounds.y1-b.bounds.y1;return Math.abs(dy)>20?dy:a.bounds.x1-b.bounds.x1})}
+function fmt(items){return items.length?items.map((x,i)=>`${i+1}. ${x.text}${Number.isFinite(x.score)?` (${(x.score*100).toFixed(1)}%)`:""}`).join("\n"):"No text recognized."}
+function drawOverlay(items960,items512){if(!selectedBitmap)return;const max=1000,s=Math.min(1,max/Math.max(selectedBitmap.width,selectedBitmap.height)),w=Math.round(selectedBitmap.width*s),h=Math.round(selectedBitmap.height*s);overlayCanvas.width=w;overlayCanvas.height=h;const c=overlayCanvas.getContext("2d");c.drawImage(selectedBitmap,0,0,w,h);c.lineWidth=Math.max(2,2*s);c.font=`${Math.max(11,13*s)}px sans-serif`;function draw(items,stroke){c.strokeStyle=stroke;c.fillStyle=stroke;for(const x of items){const b=x.bounds;c.strokeRect(b.x1*s,b.y1*s,(b.x2-b.x1)*s,(b.y2-b.y1)*s);c.fillText(x.scale,b.x1*s,Math.max(12,b.y1*s-2))}}draw(items960,"#32a8ff");draw(items512,"#ff9f0a");overlayCanvas.hidden=false}
+async function runPass(side){const params={textDetLimitSideLen:side,textDetLimitType:"max",textDetThresh:.20,textDetBoxThresh:.35,textDetUnclipRatio:2.2,textRecScoreThresh:0};const t=performance.now();const[r]=await ocr.predict(selectedBlob,params);return{result:r,seconds:(performance.now()-t)/1000,items:normalizeItems(r,String(side))}}
+async function runOcr(){if(!ocr||!selectedBlob||running)return;running=true;badge(timeBadge,"Running locally","busy");resultOutput.textContent="Running 960 and 512 grounding passes…";result960.textContent="Running…";result512.textContent="Waiting…";updateActions();const total=performance.now();try{log("Grounding diagnostic started. Pass 1: side 960, thresh .20, box .35, unclip 2.2.");const p960=await runPass(960);result960.textContent=fmt(p960.items);boxes960.textContent=String(p960.items.length);log(`960 pass: ${p960.seconds.toFixed(2)} sec · ${p960.items.length} recognized boxes.`);result512.textContent="Running…";log("Pass 2: side 512 with identical thresholds.");const p512=await runPass(512);result512.textContent=fmt(p512.items);boxes512.textContent=String(p512.items.length);log(`512 pass: ${p512.seconds.toFixed(2)} sec · ${p512.items.length} recognized boxes.`);const merged=mergeGrounded([...p960.items,...p512.items]);mergedBoxes.textContent=String(merged.length);resultOutput.textContent=fmt(merged);drawOverlay(p960.items,p512.items);const sec=(performance.now()-total)/1000;badge(timeBadge,`${sec.toFixed(1)} sec`,"good");log(`Diagnostic complete in ${sec.toFixed(2)} sec. Spatial merge kept ${merged.length} grounded boxes.`);log("Important: this SDK exposes recognized items and polygons through the high-level API, but not the raw detector probability tensor. This build therefore validates multi-scale recall first; raw probability-map instrumentation requires a lower-level detector hook.")}catch(e){badge(timeBadge,"Error","bad");resultOutput.textContent=`OCR error: ${e?.message||e}`;log(`OCR error: ${e?.message||e}`);if(e?.stack)log(e.stack)}finally{running=false;updateActions()}}
+loadButton.addEventListener("click",loadOcr);
+photoInput.addEventListener("change",async()=>{const[file]=photoInput.files||[];if(!file)return;selectedBlob=null;if(selectedBitmap){selectedBitmap.close?.();selectedBitmap=null}ocrButton.disabled=true;previewWrap.hidden=false;imageInfo.textContent="Preparing image locally…";overlayCanvas.hidden=true;try{const p=await resizeToBlob(file);selectedBlob=p.blob;selectedBitmap=await createImageBitmap(p.blob);const u=URL.createObjectURL(p.blob);previewImage.onload=()=>URL.revokeObjectURL(u);previewImage.src=u;imageInfo.textContent=`${p.originalWidth} × ${p.originalHeight} → ${p.width} × ${p.height} diagnostic source`;log(`Photo prepared locally: ${p.originalWidth}x${p.originalHeight} -> ${p.width}x${p.height}.`)}catch(e){previewWrap.hidden=true;resultOutput.textContent=`Image error: ${e?.message||e}`;log(`Image error: ${e?.message||e}`)}updateActions()});
+ocrButton.addEventListener("click",runOcr);clearLogButton.addEventListener("click",()=>logOutput.textContent="");window.addEventListener("unhandledrejection",e=>log(`Unhandled rejection: ${e.reason?.message||e.reason||"unknown"}`));
+log(`PP OCR grounding diagnostic loaded. Build ${BUILD_ID}.`);log("General two-scale test only: no retailer, colour, position or sample-specific price rule.");log("No OpenAI API, Firebase or WebGPU model has been started.");updateActions();
