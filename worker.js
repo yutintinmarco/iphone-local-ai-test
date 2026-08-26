@@ -7,7 +7,7 @@ import {
 } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0";
 
 const MODEL_ID = "HuggingFaceTB/SmolVLM-256M-Instruct";
-const MAX_NEW_TOKENS = 220;
+const MAX_NEW_TOKENS = 80;
 
 env.allowLocalModels = false;
 env.allowRemoteModels = true;
@@ -15,7 +15,8 @@ env.useBrowserCache = true;
 
 let processor = null;
 let model = null;
-let dtype = "q4";
+let dtypeConfig = null;
+let dtypeLabel = "not selected";
 let loadingPromise = null;
 
 function post(status, data = {}) {
@@ -33,7 +34,25 @@ async function checkWebGPU() {
   }
 
   const fp16 = adapter.features.has("shader-f16");
-  dtype = fp16 ? "q4f16" : "q4";
+
+  // SmolVLM is an encoder-decoder vision model. Quantizing every module to q4f16
+  // can materially hurt image understanding. Keep the sensitive embedding and
+  // vision encoder at higher precision, while quantizing only the decoder.
+  if (fp16) {
+    dtypeConfig = {
+      embed_tokens: "fp16",
+      vision_encoder: "fp16",
+      decoder_model_merged: "q4f16",
+    };
+    dtypeLabel = "mixed fp16/fp16/q4f16";
+  } else {
+    dtypeConfig = {
+      embed_tokens: "fp32",
+      vision_encoder: "fp32",
+      decoder_model_merged: "q4",
+    };
+    dtypeLabel = "mixed fp32/fp32/q4";
+  }
 
   let adapterInfo = "WebGPU adapter ready";
   try {
@@ -47,7 +66,7 @@ async function checkWebGPU() {
     // Adapter information is optional and may be hidden by the browser.
   }
 
-  post("checked", { fp16, dtype, adapterInfo });
+  post("checked", { fp16, dtype: dtypeLabel, adapterInfo });
 }
 
 async function getModel(progressCallback) {
@@ -56,7 +75,7 @@ async function getModel(progressCallback) {
   if (!loadingPromise) {
     loadingPromise = (async () => {
       await checkWebGPU();
-      post("loading", { message: `Loading ${MODEL_ID} (${dtype})` });
+      post("loading", { message: `Loading ${MODEL_ID} (${dtypeLabel})` });
 
       const processorPromise = AutoProcessor.from_pretrained(MODEL_ID, {
         progress_callback: progressCallback,
@@ -64,12 +83,12 @@ async function getModel(progressCallback) {
 
       const modelPromise = AutoModelForVision2Seq.from_pretrained(MODEL_ID, {
         device: "webgpu",
-        dtype,
+        dtype: dtypeConfig,
         progress_callback: progressCallback,
       });
 
       [processor, model] = await Promise.all([processorPromise, modelPromise]);
-      post("ready", { modelId: MODEL_ID, dtype });
+      post("ready", { modelId: MODEL_ID, dtype: dtypeLabel });
       return [processor, model];
     })().catch((error) => {
       loadingPromise = null;
@@ -132,7 +151,7 @@ async function generate({ image, prompt }) {
   await localModel.generate({
     ...inputs,
     do_sample: false,
-    repetition_penalty: 1.08,
+    repetition_penalty: 1.12,
     max_new_tokens: MAX_NEW_TOKENS,
     streamer,
   });
