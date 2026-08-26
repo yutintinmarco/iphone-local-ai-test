@@ -1,4 +1,4 @@
-const BUILD_ID = "2026-08-26b";
+const BUILD_ID = "2026-08-26c";
 const NativeWorker = window.Worker;
 
 window.Worker = class VersionedWorker extends NativeWorker {
@@ -16,6 +16,6 @@ await import(`./app.js?build=${encodeURIComponent(BUILD_ID)}`);
 
 const logOutput = document.getElementById("logOutput");
 if (logOutput) {
-  logOutput.textContent += `[build] ${BUILD_ID} · cache-bust enabled\n`;
+  logOutput.textContent += `[build] ${BUILD_ID} · GLM-OCR test · cache-bust enabled\n`;
   logOutput.scrollTop = logOutput.scrollHeight;
 }
