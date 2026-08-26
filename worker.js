@@ -1,13 +1,14 @@
 import {
   AutoProcessor,
-  AutoModelForVision2Seq,
+  AutoModelForImageTextToText,
   TextStreamer,
   load_image,
   env,
 } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0";
 
-const MODEL_ID = "HuggingFaceTB/SmolVLM-256M-Instruct";
-const MAX_NEW_TOKENS = 80;
+const MODEL_ID = "wolfofbackstreet/GLM-OCR-ONNX-q4f16";
+const DTYPE = "q4f16";
+const MAX_NEW_TOKENS = 384;
 
 env.allowLocalModels = false;
 env.allowRemoteModels = true;
@@ -15,8 +16,6 @@ env.useBrowserCache = true;
 
 let processor = null;
 let model = null;
-let dtypeConfig = null;
-let dtypeLabel = "not selected";
 let loadingPromise = null;
 
 function post(status, data = {}) {
@@ -34,24 +33,8 @@ async function checkWebGPU() {
   }
 
   const fp16 = adapter.features.has("shader-f16");
-
-  // SmolVLM is an encoder-decoder vision model. Quantizing every module to q4f16
-  // can materially hurt image understanding. Keep the sensitive embedding and
-  // vision encoder at higher precision, while quantizing only the decoder.
-  if (fp16) {
-    dtypeConfig = {
-      embed_tokens: "fp16",
-      vision_encoder: "fp16",
-      decoder_model_merged: "q4f16",
-    };
-    dtypeLabel = "mixed fp16/fp16/q4f16";
-  } else {
-    dtypeConfig = {
-      embed_tokens: "fp32",
-      vision_encoder: "fp32",
-      decoder_model_merged: "q4",
-    };
-    dtypeLabel = "mixed fp32/fp32/q4";
+  if (!fp16) {
+    throw new Error("This GLM-OCR q4f16 test requires shader-f16 support.");
   }
 
   let adapterInfo = "WebGPU adapter ready";
@@ -66,29 +49,77 @@ async function checkWebGPU() {
     // Adapter information is optional and may be hidden by the browser.
   }
 
-  post("checked", { fp16, dtype: dtypeLabel, adapterInfo });
+  post("checked", { fp16, dtype: DTYPE, adapterInfo });
 }
 
-async function getModel(progressCallback) {
+function progressForwarder(event) {
+  post("progress_event", { event });
+}
+
+async function buildAugmentedConfig() {
+  const configUrl = `https://huggingface.co/${MODEL_ID}/resolve/main/config.json`;
+  const response = await fetch(configUrl);
+  if (!response.ok) {
+    throw new Error(`Could not fetch model config (${response.status})`);
+  }
+
+  const config = await response.json();
+  const tjsConfig = config["transformers.js_config"] || {};
+  const externalData = tjsConfig.use_external_data_format || {};
+
+  externalData["vision_encoder_q4f16.onnx"] = 1;
+  externalData["decoder_model_merged_q4f16.onnx"] = 1;
+  externalData["embed_tokens_q4f16.onnx"] = 1;
+
+  tjsConfig.use_external_data_format = externalData;
+  config["transformers.js_config"] = tjsConfig;
+  return config;
+}
+
+async function loadGlmOcrModel() {
+  const commonOptions = {
+    device: "webgpu",
+    dtype: DTYPE,
+    progress_callback: progressForwarder,
+  };
+
+  try {
+    return await AutoModelForImageTextToText.from_pretrained(MODEL_ID, commonOptions);
+  } catch (firstError) {
+    post("loading", {
+      message: "Retrying GLM-OCR with explicit external-data configuration…",
+    });
+
+    const config = await buildAugmentedConfig();
+    try {
+      return await AutoModelForImageTextToText.from_pretrained(MODEL_ID, {
+        ...commonOptions,
+        config,
+      });
+    } catch (secondError) {
+      throw new Error(
+        `GLM-OCR model load failed. First attempt: ${firstError?.message || firstError}. Retry: ${secondError?.message || secondError}`,
+      );
+    }
+  }
+}
+
+async function getModel() {
   if (processor && model) return [processor, model];
 
   if (!loadingPromise) {
     loadingPromise = (async () => {
       await checkWebGPU();
-      post("loading", { message: `Loading ${MODEL_ID} (${dtypeLabel})` });
-
-      const processorPromise = AutoProcessor.from_pretrained(MODEL_ID, {
-        progress_callback: progressCallback,
+      post("loading", {
+        message: `Loading GLM-OCR 0.9B browser model (${DTYPE}, about 635 MB)…`,
       });
 
-      const modelPromise = AutoModelForVision2Seq.from_pretrained(MODEL_ID, {
-        device: "webgpu",
-        dtype: dtypeConfig,
-        progress_callback: progressCallback,
+      processor = await AutoProcessor.from_pretrained(MODEL_ID, {
+        progress_callback: progressForwarder,
       });
 
-      [processor, model] = await Promise.all([processorPromise, modelPromise]);
-      post("ready", { modelId: MODEL_ID, dtype: dtypeLabel });
+      model = await loadGlmOcrModel();
+      post("ready", { modelId: MODEL_ID, dtype: DTYPE });
       return [processor, model];
     })().catch((error) => {
       loadingPromise = null;
@@ -102,35 +133,33 @@ async function getModel(progressCallback) {
 }
 
 async function loadModel() {
-  await getModel((event) => post("progress_event", { event }));
+  await getModel();
 }
 
 async function generate({ image, prompt }) {
-  const [localProcessor, localModel] = await getModel((event) =>
-    post("progress_event", { event }),
-  );
-
+  const [localProcessor, localModel] = await getModel();
   post("generation_start");
 
+  const instruction = prompt?.trim() || "Text Recognition:";
   const messages = [
     {
       role: "user",
       content: [
-        { type: "image", image },
-        { type: "text", text: prompt },
+        { type: "image" },
+        { type: "text", text: instruction },
       ],
     },
   ];
 
-  const images = [await load_image(image)];
+  const imageObject = await load_image(image);
   const text = localProcessor.apply_chat_template(messages, {
     add_generation_prompt: true,
   });
-  const inputs = await localProcessor(text, images, {
-    do_image_splitting: false,
+  const inputs = await localProcessor(text, imageObject, {
+    add_special_tokens: false,
   });
 
-  let generated = "";
+  let streamed = "";
   let tokenCount = 0;
   let firstTokenAt = null;
 
@@ -138,8 +167,8 @@ async function generate({ image, prompt }) {
     skip_prompt: true,
     skip_special_tokens: true,
     callback_function: (chunk) => {
-      generated += chunk;
-      post("generation_update", { output: generated });
+      streamed += chunk;
+      post("generation_update", { output: streamed });
     },
     token_callback_function: () => {
       tokenCount += 1;
@@ -148,20 +177,35 @@ async function generate({ image, prompt }) {
   });
 
   const startedAt = performance.now();
-  await localModel.generate({
+  const generatedIds = await localModel.generate({
     ...inputs,
     do_sample: false,
-    repetition_penalty: 1.12,
+    repetition_penalty: 1.15,
     max_new_tokens: MAX_NEW_TOKENS,
     streamer,
   });
 
+  const promptLength = inputs.input_ids?.dims?.at(-1) ?? 0;
+  let decoded = "";
+  try {
+    const completionIds = generatedIds.slice(null, [promptLength, null]);
+    const decodedBatch = localProcessor.batch_decode(completionIds, {
+      skip_special_tokens: true,
+    });
+    decoded = decodedBatch?.[0]?.trim() || "";
+  } catch (_) {
+    decoded = "";
+  }
+
+  const output = decoded || streamed.trim();
   const elapsedMs = performance.now() - startedAt;
   const generationMs = firstTokenAt ? performance.now() - firstTokenAt : elapsedMs;
-  const tokensPerSecond = generationMs > 0 ? (tokenCount / generationMs) * 1000 : null;
+  const tokensPerSecond = generationMs > 0 && tokenCount > 0
+    ? (tokenCount / generationMs) * 1000
+    : null;
 
   post("generation_complete", {
-    output: generated.trim(),
+    output,
     elapsedMs,
     tokenCount,
     tokensPerSecond,
