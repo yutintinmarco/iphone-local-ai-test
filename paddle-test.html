@@ -4,74 +4,54 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f5f5f7">
-  <title>iPhone Local OCR Test</title>
+  <title>Price Tag Grounding Diagnostic</title>
   <link rel="stylesheet" href="./style.css">
+  <style>
+    .diag-canvas{width:100%;height:auto;border-radius:12px;background:#111;display:block}.diag-grid{display:grid;gap:14px}.mini-result{white-space:pre-wrap;overflow-wrap:anywhere;background:#111;color:#f5f5f7;border-radius:12px;padding:12px;font-size:12px;line-height:1.45;max-height:260px;overflow:auto}.metric-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.metric{background:rgba(127,127,127,.09);border-radius:10px;padding:10px;text-align:center}.metric strong{display:block;font-size:17px}.metric span{font-size:11px;opacity:.7}.legend{font-size:12px;opacity:.75}.pass-title{margin:16px 0 8px;font-size:15px}
+  </style>
 </head>
 <body>
   <main class="shell">
     <header class="hero">
-      <p class="eyebrow">Phase 3 · Stable Local OCR</p>
-      <h1>PP OCR v5 Test</h1>
-      <p class="lead">This test uses the official PaddleOCR browser SDK with the Chinese PP OCR v5 mobile models and the WASM backend. No OpenAI API, Firebase or WebGPU model loading is used.</p>
+      <p class="eyebrow">Phase 4 · Grounding Diagnostic</p>
+      <h1>PP OCR v5 Multi Scale Test</h1>
+      <p class="lead">The goal is no longer to tune one price tag. This build measures whether a general multi scale OCR pipeline can reliably ground text and prices across different retail layouts.</p>
     </header>
 
     <section class="card">
-      <div class="section-heading">
-        <div>
-          <p class="section-kicker">Step 1</p>
-          <h2>Load local OCR</h2>
-        </div>
-        <span id="statusBadge" class="badge neutral">Not loaded</span>
-      </div>
-      <p class="body-copy">This is deliberately much lighter than GLM OCR. It downloads mobile text detection and recognition models and runs them locally in Safari using ONNX Runtime WASM.</p>
+      <div class="section-heading"><div><p class="section-kicker">Step 1</p><h2>Load local OCR</h2></div><span id="statusBadge" class="badge neutral">Not loaded</span></div>
+      <p class="body-copy">PP OCR v5 runs locally using WASM. No OpenAI, Firebase or cloud inference is used.</p>
       <button id="loadButton" class="button primary" type="button">Load PP OCR v5</button>
       <p id="loadHint" class="hint">Nothing is loaded until you press the button.</p>
     </section>
 
     <section class="card">
-      <div class="section-heading">
-        <div>
-          <p class="section-kicker">Step 2</p>
-          <h2>Choose a price tag</h2>
-        </div>
-      </div>
+      <div class="section-heading"><div><p class="section-kicker">Step 2</p><h2>Choose a price tag</h2></div></div>
       <label class="file-button" for="photoInput">Take Photo or Choose Photo</label>
       <input id="photoInput" class="visually-hidden" type="file" accept="image/*" capture="environment">
-      <div id="previewWrap" class="preview-wrap" hidden>
-        <img id="previewImage" alt="Selected price tag preview">
-        <p id="imageInfo" class="hint"></p>
-      </div>
-      <button id="ocrButton" class="button primary" type="button" disabled>Recognize Text Locally</button>
+      <div id="previewWrap" class="preview-wrap" hidden><img id="previewImage" alt="Selected price tag preview"><p id="imageInfo" class="hint"></p></div>
+      <button id="ocrButton" class="button primary" type="button" disabled>Run Multi Scale Diagnostic</button>
     </section>
 
     <section class="card result-card">
-      <div class="section-heading">
-        <div>
-          <p class="section-kicker">Result</p>
-          <h2>OCR output</h2>
-        </div>
-        <span id="timeBadge" class="badge neutral">Not run</span>
+      <div class="section-heading"><div><p class="section-kicker">Diagnostic result</p><h2>Grounding comparison</h2></div><span id="timeBadge" class="badge neutral">Not run</span></div>
+      <div class="metric-row"><div class="metric"><strong id="boxes960">—</strong><span>960 boxes</span></div><div class="metric"><strong id="boxes512">—</strong><span>512 boxes</span></div><div class="metric"><strong id="mergedBoxes">—</strong><span>Merged</span></div></div>
+      <p class="legend">Blue boxes = 960 pass · Orange boxes = 512 pass. The merged list removes spatial duplicates but preserves grounded OCR text.</p>
+      <canvas id="overlayCanvas" class="diag-canvas" hidden></canvas>
+      <h3 class="pass-title">Merged grounded text</h3><pre id="resultOutput" class="result-output">No result yet.</pre>
+      <div class="diag-grid">
+        <div><h3 class="pass-title">960 pass</h3><pre id="result960" class="mini-result">Not run.</pre></div>
+        <div><h3 class="pass-title">512 pass</h3><pre id="result512" class="mini-result">Not run.</pre></div>
       </div>
-      <pre id="resultOutput" class="result-output">No result yet.</pre>
     </section>
 
     <section class="card diagnostic-card">
-      <div class="section-heading">
-        <div>
-          <p class="section-kicker">Diagnostic</p>
-          <h2>Technical log</h2>
-        </div>
-        <button id="clearLogButton" class="text-button" type="button">Clear</button>
-      </div>
+      <div class="section-heading"><div><p class="section-kicker">Diagnostic</p><h2>Technical log</h2></div><button id="clearLogButton" class="text-button" type="button">Clear</button></div>
       <pre id="logOutput" class="log-output"></pre>
     </section>
 
-    <section class="privacy-note">
-      <strong>Cost guard</strong>
-      <p>No OpenAI API, Firebase, Cloud Functions or Firebase Storage calls. Network is used only to load this page, the open source browser OCR library and its public model files. Recognition runs locally on the iPhone.</p>
-    </section>
+    <section class="privacy-note"><strong>What this build tests</strong><p>Two general detection scales are compared on the same image. No colour, price position, retailer, font or sample specific rule is used. This is a grounding experiment, not the final Price Tracker classifier.</p></section>
   </main>
-
-  <script type="module" src="./paddle-test.js?build=2026-08-26g"></script>
+  <script type="module" src="./paddle-test.js?build=2026-08-26h"></script>
 </body>
 </html>
