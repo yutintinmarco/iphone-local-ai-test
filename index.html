@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-HK">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f5f7">
+  <title>iPhone Local AI Vision Test</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <p class="eyebrow">Phase 1 · Browser Local Vision</p>
+      <h1>iPhone Local AI Test</h1>
+      <p class="lead">This page tests whether Safari can run a small vision language model locally with WebGPU. No OpenAI API and no Firebase are used.</p>
+    </header>
+
+    <section class="card status-card" aria-labelledby="device-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">Step 1</p>
+          <h2 id="device-title">Device check</h2>
+        </div>
+        <span id="overallBadge" class="badge neutral">Checking</span>
+      </div>
+
+      <dl class="status-grid">
+        <div>
+          <dt>Secure page</dt>
+          <dd id="secureStatus">Checking…</dd>
+        </div>
+        <div>
+          <dt>WebGPU</dt>
+          <dd id="webgpuStatus">Checking…</dd>
+        </div>
+        <div>
+          <dt>GPU adapter</dt>
+          <dd id="adapterStatus">Not checked</dd>
+        </div>
+        <div>
+          <dt>Model</dt>
+          <dd id="modelStatus">Not loaded</dd>
+        </div>
+      </dl>
+
+      <button id="checkButton" class="button secondary" type="button">Check again</button>
+    </section>
+
+    <section class="card" aria-labelledby="model-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">Step 2</p>
+          <h2 id="model-title">Load local vision model</h2>
+        </div>
+      </div>
+
+      <p class="body-copy">First test model: HuggingFaceTB/SmolVLM-256M-Instruct using a 4 bit WebGPU build. The model is downloaded from Hugging Face and then cached by the browser where supported.</p>
+
+      <div id="progressWrap" class="progress-wrap" hidden>
+        <div class="progress-row">
+          <span id="progressLabel">Preparing…</span>
+          <span id="progressValue">0%</span>
+        </div>
+        <progress id="progressBar" max="100" value="0">0%</progress>
+      </div>
+
+      <button id="loadButton" class="button primary" type="button" disabled>Load Local AI</button>
+      <p id="loadHint" class="hint">Waiting for the WebGPU check.</p>
+    </section>
+
+    <section class="card" aria-labelledby="photo-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">Step 3</p>
+          <h2 id="photo-title">Take a price tag photo</h2>
+        </div>
+      </div>
+
+      <label class="file-button" for="photoInput">Take Photo or Choose Photo</label>
+      <input id="photoInput" class="visually-hidden" type="file" accept="image/*" capture="environment">
+
+      <div id="previewWrap" class="preview-wrap" hidden>
+        <img id="previewImage" alt="Selected price tag preview">
+        <p id="imageInfo" class="hint"></p>
+      </div>
+
+      <label class="prompt-label" for="promptInput">Test instruction</label>
+      <textarea id="promptInput" rows="7">Read this supermarket price tag. Return only the information you can clearly see. Identify product name, pack size, current price, original price, member price, multi buy offer and promotion wording. If a field is not visible, say null. Do not guess.</textarea>
+
+      <button id="analyzeButton" class="button primary" type="button" disabled>Analyze Locally</button>
+    </section>
+
+    <section class="card result-card" aria-labelledby="result-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">Result</p>
+          <h2 id="result-title">Local AI output</h2>
+        </div>
+        <span id="timeBadge" class="badge neutral">Not run</span>
+      </div>
+
+      <pre id="resultOutput" class="result-output">No result yet.</pre>
+    </section>
+
+    <section class="card diagnostic-card" aria-labelledby="diagnostic-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">Diagnostic</p>
+          <h2 id="diagnostic-title">Technical log</h2>
+        </div>
+        <button id="clearLogButton" class="text-button" type="button">Clear</button>
+      </div>
+      <pre id="logOutput" class="log-output"></pre>
+    </section>
+
+    <section class="privacy-note" aria-label="Privacy and cost note">
+      <strong>Cost guard</strong>
+      <p>This test does not call OpenAI, Firebase, Cloud Functions or Firebase Storage. Network access is only used to load this page, the JavaScript library and the public model files. Image inference runs in the browser after the model is loaded.</p>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
