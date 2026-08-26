@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-HK">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f5f7">
+  <title>Gemini Vision Price Tag Test</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .guard{background:#fff8e1;border:1px solid #f0d889;border-radius:14px;padding:13px;line-height:1.5;margin:12px 0}
+    .guard strong{display:block;margin-bottom:4px}
+    .field{display:block;margin:12px 0}.field span{display:block;font-weight:700;margin-bottom:6px}
+    .field input{width:100%;min-height:46px;border:1px solid #d2d2d7;border-radius:12px;padding:10px 12px;background:#fff;color:#1d1d1f;font-size:16px}
+    .json-grid{display:grid;grid-template-columns:1fr;gap:10px}.kv{background:#f5f5f7;border-radius:12px;padding:11px}.kv b{display:block;font-size:12px;color:#6e6e73;margin-bottom:4px}.kv span{font-weight:650;overflow-wrap:anywhere}
+    .counter{font-size:13px;color:#6e6e73;margin-top:10px}.danger{color:#9f1c1c;font-weight:700}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <p class="eyebrow">Gemini Vision · Controlled Test</p>
+      <h1>Price Tag Vision Test</h1>
+      <p class="lead">One manual tap sends one resized price tag image to a fixed Gemini 3.5 Flash Lite backend. There is no automatic retry and no model fallback.</p>
+    </header>
+
+    <section class="card">
+      <div class="section-heading"><div><p class="section-kicker">Safety guard</p><h2>Fail closed</h2></div><span id="guardBadge" class="badge neutral">Not configured</span></div>
+      <div class="guard"><strong>Hard rules</strong>Fixed model only. Manual submit only. Button locks while a request is running. A unique request ID is used once. The backend has a daily test cap and rejects duplicate IDs. Any Gemini error stops immediately.</div>
+      <label class="field"><span>Firebase Function endpoint</span><input id="endpointInput" type="url" autocomplete="off" placeholder="https://asia-east2-price-tracker-app-8.cloudfunctions.net/geminiPriceTagTest"></label>
+      <label class="field"><span>Private test access token</span><input id="tokenInput" type="password" autocomplete="off" placeholder="Enter the test token you configured in Firebase Secret Manager"></label>
+      <button id="saveConfigButton" class="button secondary" type="button">Save on this device</button>
+      <p class="hint">The Gemini API key is never entered here and is never stored in GitHub Pages.</p>
+    </section>
+
+    <section class="card">
+      <div class="section-heading"><div><p class="section-kicker">Step 1</p><h2>Choose a price tag</h2></div></div>
+      <label class="file-button" for="photoInput">Take Photo or Choose Photo</label>
+      <input id="photoInput" class="visually-hidden" type="file" accept="image/*" capture="environment">
+      <div id="previewWrap" class="preview-wrap" hidden><img id="previewImage" alt="Selected price tag"><p id="imageInfo" class="hint"></p></div>
+    </section>
+
+    <section class="card">
+      <div class="section-heading"><div><p class="section-kicker">Step 2</p><h2>Review before sending</h2></div><span id="requestBadge" class="badge neutral">No request</span></div>
+      <p class="body-copy">The request asks Gemini to read the whole image and return structured JSON. Unknown fields must be null. It is explicitly told not to guess.</p>
+      <button id="runButton" class="button primary" type="button" disabled>Run Gemini Vision Test</button>
+      <p class="counter" id="localCounter">This device has sent 0 test requests today.</p>
+    </section>
+
+    <section class="card result-card">
+      <div class="section-heading"><div><p class="section-kicker">Result</p><h2>Structured output</h2></div><span id="timeBadge" class="badge neutral">Not run</span></div>
+      <div id="jsonGrid" class="json-grid" hidden></div>
+      <pre id="resultOutput" class="result-output">No result yet.</pre>
+    </section>
+
+    <section class="card diagnostic-card">
+      <div class="section-heading"><div><p class="section-kicker">Diagnostic</p><h2>Technical log</h2></div><button id="clearLogButton" class="text-button" type="button">Clear</button></div>
+      <pre id="logOutput" class="log-output"></pre>
+    </section>
+
+    <section class="privacy-note"><strong>Cost guard</strong><p>This page itself cannot call Gemini directly. It can only call your Firebase Function after you configure the endpoint and private test token. The backend source is fixed to Gemini 3.5 Flash Lite and includes a daily test cap.</p></section>
+  </main>
+  <script type="module" src="./gemini-test.js?build=2026-08-27a"></script>
+</body>
+</html>
